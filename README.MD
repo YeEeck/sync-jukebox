@@ -3,4 +3,4 @@
 主体为AI生成，前端基于Vue3，后端基于Go。5小时完成开发。
 
 ## DEMO
-![demo](./demo.png)
+![demo](./asset/demo.png)

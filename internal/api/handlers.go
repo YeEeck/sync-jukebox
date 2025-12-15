@@ -22,6 +22,10 @@ type API struct {
 	mediaDir string
 }
 
+type SeekPayload struct {
+	PositionMs int64 `json:"positionMs"`
+}
+
 func New(db *db.DB, state *state.Manager, hub *websocket.Hub, mediaDir string) *API {
 	return &API{db, state, hub, mediaDir}
 }
@@ -41,6 +45,7 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/player/pause", a.handlePause)
 	mux.HandleFunc("/api/player/next", a.handleNext)
 	mux.HandleFunc("/api/player/prev", a.handlePrev)
+	mux.HandleFunc("/api/player/seek", a.handleSeek)
 
 	// Static files
 	mux.Handle("/static/audio/", http.StripPrefix("/static/audio/", http.FileServer(http.Dir(a.mediaDir))))
@@ -203,5 +208,23 @@ func (a *API) handleNext(w http.ResponseWriter, r *http.Request) {
 }
 func (a *API) handlePrev(w http.ResponseWriter, r *http.Request) {
 	a.state.PrevSong()
+	w.WriteHeader(http.StatusAccepted)
+}
+
+func (a *API) handleSeek(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var payload SeekPayload
+	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+	if err := a.state.Seek(payload.PositionMs); err != nil {
+		// This error is returned if no song is playing.
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
 	w.WriteHeader(http.StatusAccepted)
 }

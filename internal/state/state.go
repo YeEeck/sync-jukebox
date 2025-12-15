@@ -381,3 +381,32 @@ func (m *Manager) RemoveSongFromLibrary(songID string) error {
 
 	return nil
 }
+
+func (m *Manager) Seek(positionMs int64) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.State.CurrentSong == nil {
+		return fmt.Errorf("no song is currently playing")
+	}
+	// Clamp the position to be within the song's duration
+	if positionMs < 0 {
+		positionMs = 0
+	}
+	// Ensure duration is not zero to avoid division by zero or invalid seek
+	if m.State.CurrentSong.DurationMs > 0 && positionMs > int64(m.State.CurrentSong.DurationMs) {
+		positionMs = int64(m.State.CurrentSong.DurationMs)
+	}
+	m.State.ProgressMs = positionMs
+	m.State.LastUpdate = time.Now()
+	// Persist the new progress and update time
+	if err := m.db.SetSystemState("progress_ms", strconv.FormatInt(positionMs, 10)); err != nil {
+		// Log the error but continue to broadcast, as the in-memory state is updated
+		// log.Printf("Warning: failed to persist seek progress: %v", err)
+	}
+	if err := m.db.SetSystemState("last_update_unix", strconv.FormatInt(m.State.LastUpdate.Unix(), 10)); err != nil {
+		// log.Printf("Warning: failed to persist seek update time: %v", err)
+	}
+	// Broadcast the new state to all clients
+	m.hub.Broadcast(m.State)
+	return nil
+}

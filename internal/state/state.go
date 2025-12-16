@@ -234,11 +234,23 @@ func (m *Manager) AddToPlaylist(songID string) error {
 
 // RemoveFromPlaylist removes a song from the playlist and updates the state
 func (m *Manager) RemoveFromPlaylist(songID string) error {
-	// 1. 从数据库删除
+	m.mu.Lock()
+	isPlayingDeletedSong := m.State.CurrentSong != nil && m.State.CurrentSong.ID == songID
+	m.mu.Unlock()
+
+	if isPlayingDeletedSong {
+		// 调用播放器的 Next 方法切歌
+		// 如果切歌失败（比如列表只有这一首了），Next() 通常会处理为停止播放
+		m.NextSong()
+		// 切歌后，稍微等待一下或确认状态更新，确保 CurrentSong 已经变了
+	}
+
+	// 从数据库删除
 	if err := m.db.RemoveSongFromPlaylist(songID); err != nil {
 		return err
 	}
-	// 2. 更新内存状态
+
+	// 更新内存状态
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	newPlaylist := make([]db.PlaylistItem, 0)
@@ -252,9 +264,6 @@ func (m *Manager) RemoveFromPlaylist(songID string) error {
 
 	// 更新最后修改时间，触发前端同步（假设有相关逻辑）
 	m.State.LastUpdate = time.Now()
-
-	// 注意：如果被删除的是当前正在播放的歌曲，您可能需要添加额外的逻辑
-	// 例如：停止播放或切到下一首。这里暂仅处理列表移除。
 
 	return nil
 }

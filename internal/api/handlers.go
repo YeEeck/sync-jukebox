@@ -273,7 +273,7 @@ func (a *API) handleSeek(c *gin.Context) {
 		return
 	}
 
-	if err := a.state.Seek(payload.PositionMs); err != nil {
+	if err := a.state.SeekTo(payload.PositionMs); err != nil {
 		// This error is returned if no song is playing.
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return

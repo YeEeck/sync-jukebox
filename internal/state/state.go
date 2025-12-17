@@ -505,7 +505,7 @@ func (m *Manager) RemoveSongFromLibrary(songID string) error {
 	return nil
 }
 
-func (m *Manager) Seek(positionMs int64) error {
+func (m *Manager) SeekTo(positionMs int64) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.State.CurrentSong == nil {

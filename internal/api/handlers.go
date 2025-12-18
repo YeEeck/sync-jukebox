@@ -64,6 +64,8 @@ func (a *API) RegisterRoutes(router *gin.Engine) {
 			playlistGroup.POST("/remove", a.handlePlaylistRemove)
 			// 移动播放列表中的歌曲位置
 			playlistGroup.POST("/move", a.handlePlaylistMove)
+			// 打乱播放列表
+			playlistGroup.POST("/shuffle", a.handlePlaylistShuffle)
 		}
 
 		playerGroup := apiGroup.Group("/player")
@@ -317,6 +319,16 @@ func (a *API) handlePlaylistMove(c *gin.Context) {
 	}
 	if err := a.state.ReorderPlaylist(payload.SongID, payload.NewIndex); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	c.Status(http.StatusOK)
+}
+
+// handlePlaylistShuffle 处理打乱播放列表的请求
+func (a *API) handlePlaylistShuffle(c *gin.Context) {
+	// 该接口不需要请求体参数
+	if err := a.state.ShufflePlaylist(); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to shuffle playlist"})
 		return
 	}
 	c.Status(http.StatusOK)

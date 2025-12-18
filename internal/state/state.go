@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"math/rand"
 	"strconv"
 	"sync"
 	"time"
@@ -352,6 +353,56 @@ func (m *Manager) RemoveFromPlaylist(songID string) error {
 	// 更新最后修改时间，触发前端同步（假设有相关逻辑）
 	m.State.LastUpdate = time.Now()
 
+	return nil
+}
+
+// ShufflePlaylist 随机打乱播放列表
+func (m *Manager) ShufflePlaylist() error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	length := len(m.State.Playlist)
+	if length <= 1 {
+		return nil // 列表为空或只有一首歌，无需打乱
+	}
+	// 初始化随机数生成器
+	r := rand.New(rand.NewSource(time.Now().UnixNano()))
+	// 使用 Fisher-Yates 算法打乱切片
+	r.Shuffle(length, func(i, j int) {
+		m.State.Playlist[i], m.State.Playlist[j] = m.State.Playlist[j], m.State.Playlist[i]
+	})
+	// 打乱后，必须重新计算当前正在播放歌曲的索引 (CurrentPlaylistIdx)
+	// 否则切歌或暂停逻辑会出错
+	if m.State.CurrentSongID != "" {
+		newIdx := -1
+		for i, item := range m.State.Playlist {
+			if item.SongID == m.State.CurrentSongID {
+				newIdx = i
+				break
+			}
+		}
+		// 理论上一定会找到，除非数据不一致
+		if newIdx != -1 {
+			m.State.CurrentPlaylistIdx = newIdx
+		} else {
+			// 极端防御性逻辑：如果找不到当前歌曲，重置播放状态
+			m.State.CurrentPlaylistIdx = 0
+			log.Println("Warning: Current song ID not found after shuffle")
+		}
+	}
+	// 更新内存中每个 Item 的 Order 字段，并准备更新数据库
+	var songIDs []string
+	for i := range m.State.Playlist {
+		m.State.Playlist[i].Order = i
+		songIDs = append(songIDs, m.State.Playlist[i].SongID)
+	}
+	// 更新数据库中的顺序
+	if err := m.db.UpdatePlaylist(songIDs); err != nil {
+		log.Printf("Error updating playlist order in DB after shuffle: %v", err)
+		return err
+	}
+	// 广播新状态给前端
+	m.hub.Broadcast(m.State)
+	log.Println("Action: Playlist shuffled")
 	return nil
 }
 

@@ -1,7 +1,7 @@
 <template>
   <div class="jukebox-layout">
     <header>
-      <img src="/icon.png" alt="SyncJukebox Icon" class="icon" />
+      <img src="@/assets/icon.png" alt="SyncJukebox Icon" class="icon" />
       <div class="title">
         SyncJukebox
       </div>

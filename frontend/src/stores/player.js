@@ -146,10 +146,14 @@ export const usePlayerStore = defineStore('player', {
       const formData = new FormData();
       formData.append('audioFile', file);
       try {
+        // 原来的代码在这里会调用 api.uploadSong 和 this.fetchLibrary()
+        // 我们将 fetchLibrary() 移除，让调用方（组件）来决定何时刷新
         await api.uploadSong(formData);
-        this.fetchLibrary(); // 上传成功后刷新媒体库
+        // this.fetchLibrary(); // <-- 移除这一行
       } catch (error) {
         console.error('Failed to upload song:', error);
+        // 抛出错误，以便组件可以捕获并处理
+        throw error;
       }
     },
 

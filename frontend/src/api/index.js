@@ -1,4 +1,5 @@
 import axios from 'axios';
+import {usePlayerStore} from "@/stores/player.js";
 
 const apiClient = axios.create({
   baseURL: '/api',
@@ -6,6 +7,25 @@ const apiClient = axios.create({
     'Content-Type': 'application/json',
   },
 });
+
+// 创建一个请求拦截器
+apiClient.interceptors.request.use(
+    (config) => {
+      // 必须在拦截器内部获取存储实例。
+      // 在顶层获取可能导致循环依赖。
+      const playerStore = usePlayerStore();
+      // 如果用户已认证，将Authorization头添加到请求中
+      if (playerStore.isAuthenticated && playerStore.authHeader) {
+        config.headers['Authorization'] = playerStore.authHeader;
+      }
+
+      return config; // 返回修改后的配置
+    },
+    (error) => {
+      // 处理请求错误
+      return Promise.reject(error);
+    }
+);
 
 export default {
   validateToken(token) {

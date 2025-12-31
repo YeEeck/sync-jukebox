@@ -3,6 +3,7 @@ package db
 import (
 	"errors"
 	"fmt"
+	"golang.org/x/crypto/bcrypt"
 	"log"
 	"time"
 
@@ -35,12 +36,36 @@ type PlaylistItem struct {
 	Song *Song `gorm:"foreignKey:SongID;references:ID;constraint:OnDelete:CASCADE" json:"song,omitempty"`
 }
 
-// Token 认证模型
-type Token struct {
-	Token     string    `gorm:"primaryKey" json:"token"`
-	IsActive  bool      `gorm:"not null;default:true" json:"is_active"`
-	CreatedAt time.Time `gorm:"autoCreateTime" json:"created_at"` // 对应 DEFAULT CURRENT_TIMESTAMP
+// User 用户模型
+type User struct {
+	ID           uint      `gorm:"primaryKey"`
+	Username     string    `gorm:"unique;not null"`
+	PasswordHash string    `gorm:"not null"`
+	CreatedAt    time.Time `gorm:"autoCreateTime"`
 }
+
+// SetPassword 哈希并设置密码
+func (u *User) SetPassword(password string) error {
+	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+	if err != nil {
+		return err
+	}
+	u.PasswordHash = string(hash)
+	return nil
+}
+
+// CheckPassword 验证密码
+func (u *User) CheckPassword(password string) bool {
+	err := bcrypt.CompareHashAndPassword([]byte(u.PasswordHash), []byte(password))
+	return err == nil
+}
+
+//// Token 认证模型
+//type Token struct {
+//	Token     string    `gorm:"primaryKey" json:"token"`
+//	IsActive  bool      `gorm:"not null;default:true" json:"is_active"`
+//	CreatedAt time.Time `gorm:"autoCreateTime" json:"created_at"` // 对应 DEFAULT CURRENT_TIMESTAMP
+//}
 
 // SystemState 系统状态模型
 type SystemState struct {
@@ -70,7 +95,7 @@ func New(dataSourceName string) (*DB, error) {
 
 	// 自动迁移模式 (AutoMigrate)
 	// GORM 会自动创建表、缺失的列和索引
-	err = db.AutoMigrate(&Song{}, &PlaylistItem{}, &Token{}, &SystemState{})
+	err = db.AutoMigrate(&Song{}, &PlaylistItem{}, &User{}, &SystemState{})
 	if err != nil {
 		return nil, fmt.Errorf("failed to migrate schema: %w", err)
 	}
@@ -92,30 +117,55 @@ func (db *DB) Close() error {
 }
 
 // --- Token 操作 ---
+//
+//func (db *DB) IsTokenValid(tokenStr string) (bool, error) {
+//	var token Token
+//	// SELECT is_active FROM tokens WHERE token = ?
+//	result := db.Select("is_active").First(&token, "token = ?", tokenStr)
+//
+//	if errors.Is(result.Error, gorm.ErrRecordNotFound) {
+//		return false, nil // Token不存在
+//	}
+//	if result.Error != nil {
+//		return false, result.Error
+//	}
+//	return token.IsActive, nil
+//}
+//
+//func (db *DB) AddToken(tokenStr string) error {
+//	token := Token{Token: tokenStr, IsActive: true}
+//	// INSERT INTO tokens ...
+//	return db.Create(&token).Error
+//}
+//
+//func (db *DB) SetTokenState(tokenStr string, isActive bool) error {
+//	// UPDATE tokens SET is_active = ? WHERE token = ?
+//	return db.Model(&Token{}).Where("token = ?", tokenStr).Update("is_active", isActive).Error
+//}
 
-func (db *DB) IsTokenValid(tokenStr string) (bool, error) {
-	var token Token
-	// SELECT is_active FROM tokens WHERE token = ?
-	result := db.Select("is_active").First(&token, "token = ?", tokenStr)
+// --- User 操作 ---
 
-	if errors.Is(result.Error, gorm.ErrRecordNotFound) {
-		return false, nil // Token不存在
+// CreateUser 创建一个新用户
+func (db *DB) CreateUser(username, password string) (*User, error) {
+	user := &User{Username: username}
+	if err := user.SetPassword(password); err != nil {
+		return nil, err
 	}
+	result := db.Create(user)
 	if result.Error != nil {
-		return false, result.Error
+		return nil, result.Error
 	}
-	return token.IsActive, nil
+	return user, nil
 }
 
-func (db *DB) AddToken(tokenStr string) error {
-	token := Token{Token: tokenStr, IsActive: true}
-	// INSERT INTO tokens ...
-	return db.Create(&token).Error
-}
-
-func (db *DB) SetTokenState(tokenStr string, isActive bool) error {
-	// UPDATE tokens SET is_active = ? WHERE token = ?
-	return db.Model(&Token{}).Where("token = ?", tokenStr).Update("is_active", isActive).Error
+// GetUserByUsername 根据用户名查找用户
+func (db *DB) GetUserByUsername(username string) (*User, error) {
+	var user User
+	result := db.Where("username = ?", username).First(&user)
+	if result.Error != nil {
+		return nil, result.Error
+	}
+	return &user, nil
 }
 
 // --- System State 操作 ---

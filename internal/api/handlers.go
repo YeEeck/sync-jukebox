@@ -1,6 +1,7 @@
 package api
 
 import (
+	"errors"
 	"fmt"
 	"gorm.io/gorm"
 	"log"
@@ -18,10 +19,11 @@ import (
 )
 
 type API struct {
-	db       *db.DB
-	state    *state.Manager
-	hub      *websocket.Hub
-	mediaDir string
+	db         *db.DB
+	state      *state.Manager
+	hub        *websocket.Hub
+	mediaDir   string
+	keyManager *InvitationKeyManager
 }
 
 type SeekPayload struct {
@@ -41,8 +43,14 @@ type AuthPayload struct {
 	Password string `json:"password" binding:"required"`
 }
 
-func New(db *db.DB, state *state.Manager, hub *websocket.Hub, mediaDir string) *API {
-	return &API{db, state, hub, mediaDir}
+type RegisterPayload struct {
+	Username string `json:"username" binding:"required"`
+	Password string `json:"password" binding:"required"`
+	Key      string `json:"key"      binding:"required"` // 前端发送的邀请密钥
+}
+
+func New(db *db.DB, state *state.Manager, hub *websocket.Hub, mediaDir string, keyManager *InvitationKeyManager) *API {
+	return &API{db, state, hub, mediaDir, keyManager}
 }
 
 // RegisterRoutes 注册 Gin 路由
@@ -145,28 +153,34 @@ func (a *API) BasicAuthMiddleware() gin.HandlerFunc {
 
 // handleRegister 处理用户注册
 func (a *API) handleRegister(c *gin.Context) {
-	var payload AuthPayload
+	var payload RegisterPayload
 	if err := c.ShouldBindJSON(&payload); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Username and password are required"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Username, password, and key are required"})
 		return
 	}
-	// 检查用户名是否已存在
+	// 1. 验证邀请密钥
+	if !a.keyManager.ValidateAndConsumeKey(payload.Key) {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid or expired invitation key"})
+		return
+	}
+	// 2. 密钥验证通过，继续执行原始的注册逻辑
 	_, err := a.db.GetUserByUsername(payload.Username)
 	if err == nil {
 		c.JSON(http.StatusConflict, gin.H{"error": "Username already exists"})
 		return
 	}
-	if err != gorm.ErrRecordNotFound {
+	if !errors.Is(err, gorm.ErrRecordNotFound) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Database error"})
 		return
 	}
-	// 创建用户
+
 	_, err = a.db.CreateUser(payload.Username, payload.Password)
 	if err != nil {
 		log.Printf("Failed to create user: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create user"})
 		return
 	}
+
 	c.JSON(http.StatusCreated, gin.H{"message": "User registered successfully"})
 }
 

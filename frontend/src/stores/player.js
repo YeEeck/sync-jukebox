@@ -1,21 +1,19 @@
 import {defineStore} from 'pinia';
-import api from '@/api'; // 假设你的api服务在这里
-import {websocketService} from '@/services/websocket'; // 假设你的websocket服务在这里
+// api 和 websocketService 的导入保持不变
+import api from '@/api';
+import {websocketService} from '@/services/websocket';
 
 const VOLUME_STORAGE_KEY = 'jukebox_volume';
-const AUTH_HEADER_STORAGE_KEY = 'jukebox_auth_header'; // 新增：用于存储认证头
+const AUTH_HEADER_STORAGE_KEY = 'jukebox_auth_header';
 
 const loadInitialVolume = () => {
     const savedVolume = localStorage.getItem(VOLUME_STORAGE_KEY);
-    if (savedVolume !== null) {
-        return parseFloat(savedVolume);
-    }
-    return 0.5;
+    return savedVolume !== null ? parseFloat(savedVolume) : 0.5;
 };
 
 export const usePlayerStore = defineStore('player', {
     state: () => ({
-        // 后端同步的状态
+        // ... 其他状态保持不变 ...
         isPlaying: false,
         currentSongId: null,
         currentSong: null,
@@ -23,10 +21,9 @@ export const usePlayerStore = defineStore('player', {
         currentPlaylistIdx: -1,
         progressMs: 0,
         playMode: 'REPEAT_ALL',
-        // 前端自身的状态
-        isAuthenticated: !!localStorage.getItem(AUTH_HEADER_STORAGE_KEY), // 根据是否存在authHeader初始化
-        authHeader: localStorage.getItem(AUTH_HEADER_STORAGE_KEY) || null, // 从localStorage加载
-        authError: null, // 用于存储登录/注册错误信息
+        isAuthenticated: !!localStorage.getItem(AUTH_HEADER_STORAGE_KEY),
+        authHeader: localStorage.getItem(AUTH_HEADER_STORAGE_KEY) || null,
+        authError: null,
         mediaLibrary: [],
         localVolume: loadInitialVolume(),
         previousVolume: null,
@@ -34,6 +31,7 @@ export const usePlayerStore = defineStore('player', {
     }),
 
     getters: {
+        // ... getters 保持不变 ...
         currentSongUrl: (state) => {
             if (state.currentSong && state.currentSong.id) {
                 return `/static/audio/${state.currentSong.id}/index.m3u8`;
@@ -55,14 +53,15 @@ export const usePlayerStore = defineStore('player', {
 
         // --- 认证与连接 ---
 
-        async register(username, password) {
+        // 修改: 接收 invitationKey
+        async register(username, password, invitationKey) {
             this.authError = null;
             try {
-                // 注意：注册是一个公开接口，不需要认证头
                 const response = await fetch('/api/register', {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({username, password}),
+                    // 修改: 在请求体中包含 key
+                    body: JSON.stringify({username, password, key: invitationKey}),
                 });
                 const data = await response.json();
                 if (!response.ok) {
@@ -75,53 +74,41 @@ export const usePlayerStore = defineStore('player', {
             }
         },
 
+        // loginAndConnect, logout, initializeAuthAndConnect 等其他 actions 保持不变
         async loginAndConnect(username, password) {
             this.authError = null;
-            // 1. 创建 Basic Auth 凭证
-            const credentials = btoa(`${username}:${password}`); // Base64 编码
+            const credentials = btoa(`${username}:${password}`);
             const authHeader = `Basic ${credentials}`;
 
             try {
-                // 2. 使用 /api/login 验证凭证
                 const response = await fetch('/api/login', {
                     method: 'POST',
                     headers: {'Authorization': authHeader},
                 });
-
                 if (!response.ok) {
                     const data = await response.json();
                     throw new Error(data.error || 'Authentication failed');
                 }
-
-                // 3. 认证成功, 保存状态并连接
                 this.authHeader = authHeader;
                 this.isAuthenticated = true;
                 localStorage.setItem(AUTH_HEADER_STORAGE_KEY, authHeader);
-
-                // **重要**: 通知你的 api 和 websocket 服务更新认证信息
-                websocketService.connect(credentials); // 传递凭证给websocket服务
-
+                websocketService.connect(credentials);
                 this.fetchLibrary();
                 return true;
-
             } catch (error) {
                 this.authError = error.message;
-                this.logout(); // 登录失败时清理状态
+                this.logout();
                 return false;
             }
         },
-
         logout() {
             this.isAuthenticated = false;
             this.authHeader = null;
             this.authError = null;
             localStorage.removeItem(AUTH_HEADER_STORAGE_KEY);
             websocketService.disconnect();
-            // 可以在这里添加路由跳转到登录页
         },
-
         async initializeAuthAndConnect() {
-            // 这个 action 在应用加载时被调用，以恢复会话
             if (!this.authHeader) {
                 this.isAuthenticated = false;
                 return false;
@@ -130,24 +117,18 @@ export const usePlayerStore = defineStore('player', {
                 console.log('Initializing session with stored credentials...');
                 const base64Credentials = this.authHeader.split(' ')[1];
                 websocketService.connect(base64Credentials);
-                // 2. 通过获取媒体库来验证凭证是否仍然有效
                 await this.fetchLibrary();
-
-                // 3. 如果成功，确认状态
                 this.isAuthenticated = true;
                 console.log('Session restored successfully.');
                 return true;
             } catch (error) {
                 console.error('Failed to restore session:', error);
-                // 如果凭证失效（例如，服务器重启、用户被删除等），则登出
                 this.logout();
                 return false;
             }
         },
 
-
-        // --- 调用 HTTP API 的 Actions  ---
-        // ... 通过已配置认证的 api 服务自动发送 auth header ...
+        // ... 其他所有 API 调用 actions 保持不变 ...
         play() {
             api.play();
         },

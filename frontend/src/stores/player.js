@@ -105,6 +105,17 @@ export const usePlayerStore = defineStore('player', {
       }
     },
 
+    // 将歌曲添加到当前播放歌曲的下一首
+    async addSongNextInPlaylist(songId) {
+      try {
+        // 假设存在一个 API 端点，它接收歌曲 ID
+        // 后端逻辑会找到当前播放歌曲的索引，并将新歌曲插入到 그 索引 + 1 的位置
+        await api.addNextToPlaylist(songId);
+      } catch (error) {
+        console.error('Failed to add song next in playlist:', error);
+      }
+    },
+
     // 调整播放列表顺序
     async movePlaylistItem(songId, newIndex) {
       try {

@@ -320,6 +320,105 @@ func (m *Manager) AddToPlaylist(songID string) error {
 	return nil
 }
 
+// AddNextInPlaylist 智能地将一首歌添加到“下一首播放”的位置
+// 它会处理歌曲已存在、列表为空等多种情况
+func (m *Manager) AddNextInPlaylist(songID string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	// 1. 验证歌曲是否存在于媒体库
+	song, err := m.db.GetSong(songID)
+	if err != nil {
+		return fmt.Errorf("song not found in library: %w", err)
+	}
+
+	// 2. 如果播放列表为空，则直接添加并播放
+	if len(m.State.Playlist) == 0 {
+		newPlaylistItem := db.PlaylistItem{SongID: songID, Song: song, Order: 0}
+		m.State.Playlist = []db.PlaylistItem{newPlaylistItem}
+
+		// 更新数据库
+		if err := m.db.UpdatePlaylist([]string{songID}); err != nil {
+			return err
+		}
+		// 开始播放
+		m.changeSong(0)
+		log.Printf("Action: AddSongNext (first song), songId: %s", songID)
+		return nil
+	}
+
+	// 3. 查找歌曲在当前播放列表中的位置
+	existingIndex := -1
+	for i, item := range m.State.Playlist {
+		if item.SongID == songID {
+			existingIndex = i
+			break
+		}
+	}
+
+	// 4. 如果要添加的歌曲就是当前正在播放的歌曲，则什么都不做
+	if existingIndex == m.State.CurrentPlaylistIdx {
+		log.Printf("Action: AddSongNext (is already current song), songId: %s. No action taken.", songID)
+		return nil
+	}
+
+	// 5. 确定目标插入位置
+	// 默认是在当前歌曲之后。如果当前没有歌曲播放(idx=-1)，则加到列表最前面
+	targetIndex := 0
+	if m.State.CurrentPlaylistIdx >= 0 {
+		targetIndex = m.State.CurrentPlaylistIdx + 1
+	}
+
+	// --- 核心逻辑: 移动或插入 ---
+	if existingIndex != -1 {
+		// --- 情况A: 歌曲已在播放列表，需要移动它 ---
+		itemToMove := m.State.Playlist[existingIndex]
+
+		// 从切片中移除
+		tempPlaylist := append(m.State.Playlist[:existingIndex], m.State.Playlist[existingIndex+1:]...)
+
+		// 如果移除的位置在目标位置之前，目标位置的索引需要-1
+		if existingIndex < targetIndex {
+			targetIndex--
+		}
+
+		// 插入到目标位置
+		m.State.Playlist = append(tempPlaylist[:targetIndex], append([]db.PlaylistItem{itemToMove}, tempPlaylist[targetIndex:]...)...)
+		log.Printf("Action: AddSongNext (move existing song), songId: %s to index %d", songID, targetIndex)
+
+	} else {
+		// --- 情况B: 歌曲不在播放列表，需要插入它 ---
+		newPlaylistItem := db.PlaylistItem{SongID: songID, Song: song}
+		// 插入到目标位置
+		m.State.Playlist = append(m.State.Playlist[:targetIndex], append([]db.PlaylistItem{newPlaylistItem}, m.State.Playlist[targetIndex:]...)...)
+		log.Printf("Action: AddSongNext (insert new song), songId: %s to index %d", songID, targetIndex)
+	}
+
+	// 7. 更新整个播放列表的 order 和数据库
+	var songIDs []string
+	var newCurrentIdx = m.State.CurrentPlaylistIdx // 预设为当前索引
+
+	for i := range m.State.Playlist {
+		m.State.Playlist[i].Order = i
+		songIDs = append(songIDs, m.State.Playlist[i].SongID)
+		// 因为列表结构变了，重新确认当前播放歌曲的索引
+		if m.State.Playlist[i].SongID == m.State.CurrentSongID {
+			newCurrentIdx = i
+		}
+	}
+
+	m.State.CurrentPlaylistIdx = newCurrentIdx // 更新内存中的当前播放索引
+
+	if err := m.db.UpdatePlaylist(songIDs); err != nil {
+		log.Printf("Error updating playlist in DB for AddNext: %v", err)
+		return err
+	}
+
+	// 8. 广播状态变更
+	m.hub.Broadcast(m.State)
+	return nil
+}
+
 // RemoveFromPlaylist removes a song from the playlist and updates the state
 func (m *Manager) RemoveFromPlaylist(songID string) error {
 	m.mu.Lock()

@@ -1,9 +1,7 @@
 package api
 
 import (
-	"errors"
 	"fmt"
-	"gorm.io/gorm"
 	"log"
 	"net/http"
 	"os"
@@ -19,11 +17,10 @@ import (
 )
 
 type API struct {
-	db         *db.DB
-	state      *state.Manager
-	hub        *websocket.Hub
-	mediaDir   string
-	keyManager *InvitationKeyManager
+	db       *db.DB
+	state    *state.Manager
+	hub      *websocket.Hub
+	mediaDir string
 }
 
 type SeekPayload struct {
@@ -38,23 +35,15 @@ type ReorderPlaylistPayload struct {
 	NewIndex int    `json:"newIndex"`
 }
 
-type AuthPayload struct {
-	Username string `json:"username" binding:"required"`
-	Password string `json:"password" binding:"required"`
-}
-
-type RegisterPayload struct {
-	Username string `json:"username" binding:"required"`
-	Password string `json:"password" binding:"required"`
-	Key      string `json:"key"      binding:"required"` // 前端发送的邀请密钥
-}
-
-func New(db *db.DB, state *state.Manager, hub *websocket.Hub, mediaDir string, keyManager *InvitationKeyManager) *API {
-	return &API{db, state, hub, mediaDir, keyManager}
+func New(db *db.DB, state *state.Manager, hub *websocket.Hub, mediaDir string) *API {
+	return &API{db, state, hub, mediaDir}
 }
 
 // RegisterRoutes 注册 Gin 路由
 func (a *API) RegisterRoutes(router *gin.Engine) {
+	// Web Sockets
+	// WebSocket 通常需要直接操作 http.ResponseWriter 和 *http.Request
+	router.GET("/ws", a.handleWebSocket)
 
 	// Static files
 	router.Static("/static/audio", a.mediaDir)
@@ -62,47 +51,35 @@ func (a *API) RegisterRoutes(router *gin.Engine) {
 	// API Group
 	apiGroup := router.Group("/api")
 	{
-		// Web Sockets
-		// WebSocket 通常需要直接操作 http.ResponseWriter 和 *http.Request
-		router.GET("/ws", a.handleWebSocket)
+		apiGroup.GET("/validate-token", a.handleValidateToken)
 
-		// --- 公开路由 (无需认证) ---
-		apiGroup.POST("/register", a.handleRegister)
-		apiGroup.POST("/login", a.handleLogin) // 用于前端验证凭证
-		// --- 受保护的路由组 ---
-		// 使用 BasicAuthMiddleware 中间件
-		protected := apiGroup.Group("")
-		protected.Use(a.BasicAuthMiddleware())
+		libraryGroup := apiGroup.Group("/library")
 		{
-			libraryGroup := apiGroup.Group("/library")
-			{
-				libraryGroup.GET("", a.handleGetLibrary)
-				libraryGroup.POST("/upload", a.handleUpload)
-				libraryGroup.POST("/remove", a.handleLibraryRemove)
-			}
-
-			playlistGroup := apiGroup.Group("/playlist")
-			{
-				playlistGroup.POST("/add", a.handlePlaylistAdd)
-				playlistGroup.POST("/remove", a.handlePlaylistRemove)
-				// 移动播放列表中的歌曲位置
-				playlistGroup.POST("/move", a.handlePlaylistMove)
-				// 打乱播放列表
-				playlistGroup.POST("/shuffle", a.handlePlaylistShuffle)
-			}
-
-			playerGroup := apiGroup.Group("/player")
-			{
-				playerGroup.POST("/play", a.handlePlay)
-				// 播放列表中指定的歌曲
-				playerGroup.POST("/play-specific", a.handlePlaySpecific)
-				playerGroup.POST("/pause", a.handlePause)
-				playerGroup.POST("/next", a.handleNext)
-				playerGroup.POST("/prev", a.handlePrev)
-				playerGroup.POST("/seek", a.handleSeek)
-			}
+			libraryGroup.GET("", a.handleGetLibrary)
+			libraryGroup.POST("/upload", a.handleUpload)
+			libraryGroup.POST("/remove", a.handleLibraryRemove)
 		}
 
+		playlistGroup := apiGroup.Group("/playlist")
+		{
+			playlistGroup.POST("/add", a.handlePlaylistAdd)
+			playlistGroup.POST("/remove", a.handlePlaylistRemove)
+			// 移动播放列表中的歌曲位置
+			playlistGroup.POST("/move", a.handlePlaylistMove)
+			// 打乱播放列表
+			playlistGroup.POST("/shuffle", a.handlePlaylistShuffle)
+		}
+
+		playerGroup := apiGroup.Group("/player")
+		{
+			playerGroup.POST("/play", a.handlePlay)
+			// 播放列表中指定的歌曲
+			playerGroup.POST("/play-specific", a.handlePlaySpecific)
+			playerGroup.POST("/pause", a.handlePause)
+			playerGroup.POST("/next", a.handleNext)
+			playerGroup.POST("/prev", a.handlePrev)
+			playerGroup.POST("/seek", a.handleSeek)
+		}
 	}
 }
 
@@ -112,93 +89,18 @@ func (a *API) handleWebSocket(c *gin.Context) {
 	a.hub.ServeWs(c.Writer, c.Request, a.state.GetFullState)
 }
 
-//func (a *API) handleValidateToken(c *gin.Context) {
-//	token := c.Query("token")
-//	if token == "" {
-//		c.JSON(http.StatusBadRequest, gin.H{"error": "Token is required"})
-//		return
-//	}
-//	valid, err := a.db.IsTokenValid(token)
-//	if err != nil {
-//		c.JSON(http.StatusInternalServerError, gin.H{"error": "Internal server error"})
-//		return
-//	}
-//	c.JSON(http.StatusOK, gin.H{"valid": valid})
-//}
-
-// --- 认证处理 ---
-// BasicAuthMiddleware 是一个 Gin 中间件，用于验证 Basic Authentication
-func (a *API) BasicAuthMiddleware() gin.HandlerFunc {
-	return func(c *gin.Context) {
-		user, pass, ok := c.Request.BasicAuth()
-		if !ok {
-			c.Header("WWW-Authenticate", `Basic realm="Restricted"`)
-			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "Authorization header not provided"})
-			return
-		}
-		dbUser, err := a.db.GetUserByUsername(user)
-		if err != nil {
-			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "Invalid credentials"})
-			return
-		}
-		if !dbUser.CheckPassword(pass) {
-			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "Invalid credentials"})
-			return
-		}
-		// 可选：将用户信息存入 context
-		c.Set("username", dbUser.Username)
-		c.Next()
-	}
-}
-
-// handleRegister 处理用户注册
-func (a *API) handleRegister(c *gin.Context) {
-	var payload RegisterPayload
-	if err := c.ShouldBindJSON(&payload); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Username, password, and key are required"})
+func (a *API) handleValidateToken(c *gin.Context) {
+	token := c.Query("token")
+	if token == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Token is required"})
 		return
 	}
-	// 1. 验证邀请密钥
-	if !a.keyManager.ValidateAndConsumeKey(payload.Key) {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid or expired invitation key"})
-		return
-	}
-	// 2. 密钥验证通过，继续执行原始的注册逻辑
-	_, err := a.db.GetUserByUsername(payload.Username)
-	if err == nil {
-		c.JSON(http.StatusConflict, gin.H{"error": "Username already exists"})
-		return
-	}
-	if !errors.Is(err, gorm.ErrRecordNotFound) {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Database error"})
-		return
-	}
-
-	_, err = a.db.CreateUser(payload.Username, payload.Password)
+	valid, err := a.db.IsTokenValid(token)
 	if err != nil {
-		log.Printf("Failed to create user: %v", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create user"})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Internal server error"})
 		return
 	}
-
-	c.JSON(http.StatusCreated, gin.H{"message": "User registered successfully"})
-}
-
-// handleLogin 验证用户凭证 (主要用于前端检查)
-func (a *API) handleLogin(c *gin.Context) {
-	// 复用中间件的逻辑
-	user, pass, ok := c.Request.BasicAuth()
-	if !ok {
-		c.Header("WWW-Authenticate", `Basic realm="Restricted"`)
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Authorization header not provided"})
-		return
-	}
-	dbUser, err := a.db.GetUserByUsername(user)
-	if err != nil || !dbUser.CheckPassword(pass) {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid credentials"})
-		return
-	}
-	c.JSON(http.StatusOK, gin.H{"message": "Login successful"})
+	c.JSON(http.StatusOK, gin.H{"valid": valid})
 }
 
 func (a *API) handleGetLibrary(c *gin.Context) {

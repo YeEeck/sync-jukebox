@@ -1,4 +1,4 @@
-// src/main.ts
+// src/main.js
 
 import { createApp } from 'vue'
 import { createPinia } from 'pinia'
@@ -15,28 +15,20 @@ const pinia = createPinia()
 app.use(pinia)
 app.use(router)
 
-// --- 新的自动登录逻辑 ---
+// 在挂载应用之前，尝试自动登录
+const playerStore = usePlayerStore(pinia) // 注意：在 setup 外使用 store 需要传入 pinia 实例
+const token = localStorage.getItem('jukebox_token')
 
-// 在 setup 函数之外使用 store，需要将 pinia 实例作为参数传入
-const playerStore = usePlayerStore(pinia)
-
-// store 的 state 在创建时已经从 localStorage 中自动加载了 authHeader，
-// 并设置了 isAuthenticated 的初始值。我们直接检查这个状态即可。
-if (playerStore.isAuthenticated) {
-  console.log('Found stored authentication credentials, attempting to auto-login...');
-
-  // 调用新的 action 来验证凭证并重新建立连接
-  playerStore.initializeAuthAndConnect().then(success => {
+if (token) {
+  // 使用已有的 action 尝试自动连接和获取状态
+  // 这个 action 已经是 async 的，但我们这里可以“即发即忘”，让它在后台执行
+  playerStore.validateTokenAndConnect(token).then(success => {
     if (!success) {
-      // 如果凭证失效，initializeAuthAndConnect 内部会调用 logout() 来清理 localStorage。
-      // 我们只需要将用户重定向到登录页面。
-      console.log('Stored credentials invalid or session expired. Redirecting to login page.');
-      router.push('/login');
-    } else {
-      console.log('Auto-login successful.');
+      // 如果 token 失效，清空它并强制跳转到登录页
+      localStorage.removeItem('jukebox_token')
+      router.push('/login')
     }
-  });
+  })
 }
 
 app.mount('#app')
-

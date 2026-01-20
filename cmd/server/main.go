@@ -3,17 +3,15 @@
 package main
 
 import (
-	"log"
-	"mime"
-	"os"
-	"time"
-
 	"github.com/gin-contrib/cors" // 1. 引入 Gin 的 CORS 库
 	"github.com/gin-gonic/gin"    // 2. 引入 Gin
 	"github.com/yeeeck/sync-jukebox/internal/api"
 	"github.com/yeeeck/sync-jukebox/internal/db"
 	"github.com/yeeeck/sync-jukebox/internal/state"
 	"github.com/yeeeck/sync-jukebox/internal/websocket"
+	"log"
+	"mime"
+	"os"
 )
 
 const (
@@ -21,7 +19,6 @@ const (
 	mediaDir    = "./media"
 	frontendDir = "./frontend/dist"
 	serverAddr  = ":8880"
-	keyFilePath = "./invitation.key"
 )
 
 func main() {
@@ -38,22 +35,6 @@ func main() {
 	if err := mime.AddExtensionType(".ts", "video/mp2t"); err != nil {
 		log.Printf("Warning: Failed to register .ts mime type: %v", err)
 	}
-
-	// --- 初始化密钥管理器 ---
-	keyManager := api.NewInvitationKeyManager(keyFilePath)
-
-	if _, err := keyManager.GenerateNewKey(); err != nil {
-		log.Fatalf("Failed to generate initial invitation key: %v", err)
-	}
-	go func() {
-		ticker := time.NewTicker(24 * time.Hour)
-		defer ticker.Stop()
-		for range ticker.C {
-			if _, err := keyManager.GenerateNewKey(); err != nil {
-				log.Printf("Error in periodic key generation: %v", err)
-			}
-		}
-	}()
 
 	database, err := db.New(dbPath)
 	if err != nil {
@@ -88,7 +69,7 @@ func main() {
 
 	// 5. 注册 API 路由
 	// 注意：这里需要根据之前修改的 api.go，传入 router 而不是 mux
-	apiHandler := api.New(database, stateManager, hub, mediaDir, keyManager)
+	apiHandler := api.New(database, stateManager, hub, mediaDir)
 	apiHandler.RegisterRoutes(router)
 
 	// 6. 服务前端静态文件

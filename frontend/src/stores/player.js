@@ -1,11 +1,11 @@
-import {defineStore} from 'pinia';
-// api 和 websocketService 的导入保持不变
+import { defineStore } from 'pinia';
 import api from '@/api';
-import {websocketService} from '@/services/websocket';
+import { websocketService } from '@/services/websocket';
 
 const VOLUME_STORAGE_KEY = 'jukebox_volume';
 const AUTH_HEADER_STORAGE_KEY = 'jukebox_auth_header';
 
+// --- 辅助函数：从 localStorage 安全地加载音量 ---
 const loadInitialVolume = () => {
     const savedVolume = localStorage.getItem(VOLUME_STORAGE_KEY);
     return savedVolume !== null ? parseFloat(savedVolume) : 0.5;
@@ -128,95 +128,132 @@ export const usePlayerStore = defineStore('player', {
             }
         },
 
-        // ... 其他所有 API 调用 actions 保持不变 ...
-        play() {
-            api.play();
-        },
-        async playSpecificSong(songId) {
-            try {
-                await api.playSpecific(songId);
-            } catch (error) {
-                console.error('Failed to play specific song:', error);
-            }
-        },
-        pause() {
-            api.pause();
-        },
-        next() {
-            api.next();
-        },
-        prev() {
-            api.prev();
-        },
-        seekTo(positionMs) {
-            api.seek(positionMs);
-        },
-        async addToPlaylist(songId) {
-            try {
-                await api.addToPlaylist(songId);
-            } catch (error) {
-                console.error('Failed to add song to playlist:', error);
-            }
-        },
-        async movePlaylistItem(songId, newIndex) {
-            try {
-                await api.movePlaylistItem(songId, newIndex);
-            } catch (error) {
-                console.error('Failed to reorder playlist:', error);
-            }
-        },
-        async shufflePlaylist() {
-            try {
-                await api.shufflePlaylist();
-            } catch (error) {
-                console.error('Failed to shuffle playlist:', error);
-            }
-        },
-        async removeSongFromPlaylist(songId) {
-            try {
-                await api.removeFromPlaylist(songId);
-            } catch (error) {
-                console.error('Failed to remove song from playlist:', error);
-            }
-        },
-        async fetchLibrary() {
-            try {
-                const response = await api.getLibrary();
-                this.mediaLibrary = response.data;
-            } catch (error) {
-                console.error('Failed to fetch library:', error);
-            }
-        },
-        async uploadSong(file) {
-            const formData = new FormData();
-            formData.append('audioFile', file);
-            try {
-                await api.uploadSong(formData);
-            } catch (error) {
-                console.error('Failed to upload song:', error);
-                throw error;
-            }
-        },
-        async removeSongFromLibrary(songId) {
-            try {
-                await api.removeSong(songId);
-            } catch (error) {
-                console.error('Failed to remove song:', error);
-            }
-        },
-        setLocalVolume(newVolume) {
-            const clampedVolume = Math.max(0, Math.min(1, newVolume));
-            this.localVolume = clampedVolume;
-            localStorage.setItem(VOLUME_STORAGE_KEY, clampedVolume.toString());
-        },
-        toggleMute() {
-            if (this.localVolume > 0) {
-                this.previousVolume = this.localVolume;
-                this.setLocalVolume(0);
-            } else {
-                const targetVolume = (this.previousVolume && this.previousVolume > 0) ? this.previousVolume : 0.5;
-                this.setLocalVolume(targetVolume);
-            }
-        }
+    // --- 调用 HTTP API 的 Actions (Fire and Forget) ---
+    play() { api.play(); },
+    // 播放指定 ID 的歌曲
+    async playSpecificSong(songId) {
+      try {
+        await api.playSpecific(songId);
+      } catch (error) {
+        console.error('Failed to play specific song:', error);
+      }
     },
+    pause() { api.pause(); },
+    next() { api.next(); },
+    prev() { api.prev(); },
+    seekTo(positionMs) {
+      // "Fire and Forget"
+      // 我们发送指令，然后等待 WebSocket 推送校准后的进度
+      api.seek(positionMs);
+    },
+
+    async addToPlaylist(songId) {
+      try {
+        await api.addToPlaylist(songId);
+        // 无需手动更新 state，等待 WebSocket 推送
+      } catch (error) {
+        console.error('Failed to add song to playlist:', error);
+      }
+    },
+
+    // 将歌曲添加到当前播放歌曲的下一首
+    async addSongNextInPlaylist(songId) {
+      try {
+        // 假设存在一个 API 端点，它接收歌曲 ID
+        // 后端逻辑会找到当前播放歌曲的索引，并将新歌曲插入到 그 索引 + 1 的位置
+        await api.addNextToPlaylist(songId);
+      } catch (error) {
+        console.error('Failed to add song next in playlist:', error);
+      }
+    },
+
+    // 调整播放列表顺序
+    async movePlaylistItem(songId, newIndex) {
+      try {
+        // 先调用 API，状态更新依赖 WebSocket 推送，保持前端状态单一数据源
+        await api.movePlaylistItem(songId, newIndex);
+      } catch (error) {
+        console.error('Failed to reorder playlist:', error);
+      }
+    },
+
+    async shufflePlaylist() {
+      try {
+        await api.shufflePlaylist();
+        // 同样不需要手动更新 state，等待 WebSocket 推送新的 GlobalState
+      } catch (error) {
+        console.error('Failed to shuffle playlist:', error);
+      }
+    },
+
+    async removeSongFromPlaylist(songId) {
+      try {
+        await api.removeFromPlaylist(songId);
+        // 无需手动更新 state.playlist，依赖 WebSocket 推送
+      } catch (error) {
+        console.error('Failed to remove song from playlist:', error);
+      }
+    },
+
+    async fetchLibrary() {
+      try {
+        const response = await api.getLibrary();
+        this.mediaLibrary = response.data;
+      } catch (error) {
+        console.error('Failed to fetch library:', error);
+      }
+    },
+
+    async uploadSong(file) {
+      const formData = new FormData();
+      formData.append('audioFile', file);
+      try {
+        // 原来的代码在这里会调用 api.uploadSong 和 this.fetchLibrary()
+        // 我们将 fetchLibrary() 移除，让调用方（组件）来决定何时刷新
+        await api.uploadSong(formData);
+        // this.fetchLibrary(); // <-- 移除这一行
+      } catch (error) {
+        console.error('Failed to upload song:', error);
+        // 抛出错误，以便组件可以捕获并处理
+        throw error;
+      }
+    },
+
+    async removeSongFromLibrary(songId) {
+      try {
+        await api.removeSong(songId);
+        // "Fire and Forget" - 无需手动修改 state
+        // 后端会处理删除，并通过 WebSocket 推送最新的 mediaLibrary 和 playlist
+      } catch (error) {
+        console.error('Failed to remove song:', error);
+        // 可以在此添加用户错误提示
+      }
+    },
+
+    setLocalVolume(newVolume) {
+      // 增加一个安全边界，确保音量值在 0 和 1 之间
+      const clampedVolume = Math.max(0, Math.min(1, newVolume));
+
+      this.localVolume = clampedVolume;
+
+      // --- 将新音量保存到 localStorage ---
+      localStorage.setItem(VOLUME_STORAGE_KEY, clampedVolume.toString());
+    },
+
+    // 切换静音/恢复音量
+    toggleMute() {
+      if (this.localVolume > 0) {
+        // 当前有声音，记录当前音量并静音
+        this.previousVolume = this.localVolume;
+        this.setLocalVolume(0);
+      } else {
+        // 当前是静音，恢复音量
+        // 如果有记录且记录大于0，则恢复记录值；否则默认恢复到 0.5
+        const targetVolume = (this.previousVolume && this.previousVolume > 0)
+          ? this.previousVolume
+          : 0.5;
+        this.setLocalVolume(targetVolume);
+      }
+    }
+  },
 });

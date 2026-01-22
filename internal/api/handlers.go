@@ -81,15 +81,17 @@ func (a *API) RegisterRoutes(router *gin.Engine) {
 				libraryGroup.POST("/remove", a.handleLibraryRemove)
 			}
 
-			playlistGroup := apiGroup.Group("/playlist")
-			{
-				playlistGroup.POST("/add", a.handlePlaylistAdd)
-				playlistGroup.POST("/remove", a.handlePlaylistRemove)
-				// 移动播放列表中的歌曲位置
-				playlistGroup.POST("/move", a.handlePlaylistMove)
-				// 打乱播放列表
-				playlistGroup.POST("/shuffle", a.handlePlaylistShuffle)
-			}
+		playlistGroup := apiGroup.Group("/playlist")
+		{
+			playlistGroup.POST("/add", a.handlePlaylistAdd)
+			// 下一首播放
+			playlistGroup.POST("/add-next", a.handlePlaylistAddNext)
+			playlistGroup.POST("/remove", a.handlePlaylistRemove)
+			// 移动播放列表中的歌曲位置
+			playlistGroup.POST("/move", a.handlePlaylistMove)
+			// 打乱播放列表
+			playlistGroup.POST("/shuffle", a.handlePlaylistShuffle)
+		}
 
 			playerGroup := apiGroup.Group("/player")
 			{
@@ -102,7 +104,6 @@ func (a *API) RegisterRoutes(router *gin.Engine) {
 				playerGroup.POST("/seek", a.handleSeek)
 			}
 		}
-
 	}
 }
 
@@ -460,6 +461,23 @@ func (a *API) handlePlaylistShuffle(c *gin.Context) {
 	// 该接口不需要请求体参数
 	if err := a.state.ShufflePlaylist(); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to shuffle playlist"})
+		return
+	}
+	c.Status(http.StatusOK)
+}
+
+// handlePlaylistAddNext 处理将歌曲添加到下一首播放的请求
+func (a *API) handlePlaylistAddNext(c *gin.Context) {
+	var payload struct {
+		SongID string `json:"songId"`
+	}
+	if err := c.ShouldBindJSON(&payload); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request body"})
+		return
+	}
+
+	if err := a.state.AddNextInPlaylist(payload.SongID); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to add song next in playlist: " + err.Error()})
 		return
 	}
 	c.Status(http.StatusOK)

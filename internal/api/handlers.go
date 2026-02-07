@@ -69,6 +69,7 @@ func (a *API) RegisterRoutes(router *gin.Engine) {
 		// --- 公开路由 (无需认证) ---
 		apiGroup.POST("/register", a.handleRegister)
 		apiGroup.POST("/login", a.handleLogin) // 用于前端验证凭证
+		apiGroup.GET("/users/check", a.handleCheckUsername)
 		// --- 受保护的路由组 ---
 		// 使用 BasicAuthMiddleware 中间件
 		protected := apiGroup.Group("")
@@ -137,6 +138,32 @@ func (a *API) handleWebSocket(c *gin.Context) {
 func (a *API) handleGetOnlineUsers(c *gin.Context) {
 	onlineUsers := a.hub.GetOnlineUsers()
 	c.JSON(http.StatusOK, onlineUsers)
+}
+
+// handleCheckUsername 检查用户名是否已被注册
+func (a *API) handleCheckUsername(c *gin.Context) {
+	// 1. 从查询参数获取用户名
+	username := c.Query("username")
+	if username == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Username query parameter is required"})
+		return
+	}
+	// 2. 查询数据库
+	_, err := a.db.GetUserByUsername(username)
+	// 3. 根据查询结果返回 JSON
+	if err == nil {
+		// 没有错误，意味着用户找到了
+		c.JSON(http.StatusOK, gin.H{"exists": true})
+		return
+	}
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		// "记录未找到"是期望的错误，意味着用户名可用
+		c.JSON(http.StatusOK, gin.H{"exists": false})
+		return
+	}
+	// 其他数据库错误
+	log.Printf("Error checking username '%s': %v", username, err)
+	c.JSON(http.StatusInternalServerError, gin.H{"error": "Database error"})
 }
 
 //func (a *API) handleValidateToken(c *gin.Context) {

@@ -17,10 +17,24 @@
     <!-- 注册表单 -->
     <form v-else @submit.prevent="handleRegister">
       <h2>Register</h2>
-      <input v-model="username" type="text" placeholder="Username" required autocomplete="username"/>
-      <input v-model="password" type="password" placeholder="Password" required autocomplete="new-password"/>
-      <!-- 新增: 邀请密钥输入框 -->
-      <input v-model="invitationKey" type="text" placeholder="Invitation Key" required />
+      <div>
+        <input
+            v-model="username"
+            type="text"
+            placeholder="Username"
+            required
+            autocomplete="username"
+            @blur="validateUsername"
+            @input="usernameExistsError = ''"
+        />
+        <p v-if="usernameExistsError" class="input-error-message">{{ usernameExistsError }}</p>
+      </div>
+      <div>
+        <input v-model="password" type="password" placeholder="Password" required autocomplete="new-password"/>
+      </div>
+      <div>
+        <input v-model="invitationKey" type="text" placeholder="Invitation Key" required />
+      </div>
       <button type="submit">Register</button>
       <p>
         Already have an account? <br>
@@ -41,6 +55,7 @@ import {usePlayerStore} from '@/stores/player';
 const isRegistering = ref(false);
 const username = ref('');
 const password = ref('');
+const usernameExistsError = ref('');
 const invitationKey = ref(''); // 新增: 邀请密钥的状态
 const message = ref('');
 const isError = ref(false);
@@ -55,6 +70,7 @@ const clearForm = () => {
   username.value = '';
   password.value = '';
   invitationKey.value = ''; // 新增: 清理密钥
+  usernameExistsError.value = '';
 };
 
 // 切换登录/注册表单
@@ -63,8 +79,37 @@ const toggleForm = () => {
   clearForm();
 };
 
+// --- 修改: 使用 try...catch 处理验证逻辑 ---
+const validateUsername = async () => {
+  if (!username.value.trim()) {
+    usernameExistsError.value = '';
+    return;
+  }
+  try {
+    const exists = await playerStore.checkUsernameExists(username.value);
+    if (exists) {
+      usernameExistsError.value = 'Username is already taken.';
+    } else {
+      usernameExistsError.value = '';
+    }
+  } catch (error) {
+    // 捕获 store 抛出的错误并显示
+    usernameExistsError.value = error.message;
+  }
+};
+
 // 处理注册
 const handleRegister = async () => {
+  // 清空之前的消息
+  message.value = '';
+  isError.value = false;
+  // --- 新增: 在提交时再次进行最终验证 ---
+  await validateUsername();
+  if (usernameExistsError.value) {
+    // 如果用户名错误存在，则不继续提交
+    return;
+  }
+
   // 修改: 检查邀请密钥
   if (!username.value || !password.value || !invitationKey.value) {
     message.value = 'Username, password and invitation key cannot be empty.';
@@ -161,5 +206,26 @@ a:hover {
 }
 .success-message {
   color: #4CAF50;
+}
+/* --- 修改: 优化 input 和 form 布局 --- */
+input {
+  width: 100%; /* 让 input 填满其父 div */
+  box-sizing: border-box; /* 防止 padding 影响宽度计算 */
+  padding: 0.8rem;
+  border-radius: 4px;
+  border: 1px solid #444;
+  background-color: #222;
+  color: white;
+  font-size: 1rem;
+}
+form div {
+  width: 100%; /* 确保所有 div 容器宽度一致 */
+}
+.input-error-message {
+  color: #f44336;
+  font-size: 0.8rem;
+  text-align: left;
+  margin: 4px 0 0 0;
+  padding: 0;
 }
 </style>

@@ -56,6 +56,23 @@ export const usePlayerStore = defineStore('player', {
 
         // --- 认证与连接 ---
 
+        async checkUsernameExists(username) {
+            try {
+                // 调用新的后端端点
+                const response = await fetch(`/api/users/check?username=${encodeURIComponent(username)}`);
+                if (!response.ok) {
+                    // 如果请求失败，为简单起见，我们假设用户名不可用或检查失败
+                    console.error('Username check failed:', response.statusText);
+                    return true; // 谨慎起见，返回 true 以阻止注册
+                }
+                const data = await response.json();
+                return data.exists; // 返回后端返回的 boolean 值
+            } catch (error) {
+                console.error('Error checking username:', error);
+                return true; // 网络错误等，同样返回 true 阻止注册
+            }
+        },
+        
         // 修改: 接收 invitationKey
         async register(username, password, invitationKey) {
             this.authError = null;

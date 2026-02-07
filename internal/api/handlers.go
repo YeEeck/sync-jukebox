@@ -104,6 +104,7 @@ func (a *API) RegisterRoutes(router *gin.Engine) {
 				playerGroup.POST("/next", a.handleNext)
 				playerGroup.POST("/prev", a.handlePrev)
 				playerGroup.POST("/seek", a.handleSeek)
+				playerGroup.POST("/toggle-mode", a.handleTogglePlayMode)
 			}
 		}
 	}
@@ -534,4 +535,10 @@ func (a *API) handlePlaylistAddNext(c *gin.Context) {
 		return
 	}
 	c.Status(http.StatusOK)
+}
+
+// handleTogglePlayMode 处理切换播放模式的请求
+func (a *API) handleTogglePlayMode(c *gin.Context) {
+	a.state.TogglePlayMode()
+	c.Status(http.StatusAccepted)
 }

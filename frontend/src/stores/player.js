@@ -251,6 +251,13 @@ export const usePlayerStore = defineStore('player', {
                 console.error('Failed to remove song from playlist:', error);
             }
         },
+        togglePlayMode() {
+            // 这个 action 调用 API，后端会处理状态变更并通过 WebSocket 广播回来
+            // 所以前端不需要直接修改 state.playMode
+            api.togglePlayMode().catch(error => {
+                console.error('Failed to toggle play mode:', error);
+            });
+        },
         async fetchLibrary() {
             try {
                 const response = await api.getLibrary();

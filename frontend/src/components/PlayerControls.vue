@@ -1,5 +1,7 @@
 <template>
   <div class="controls-wrapper">
+    <!-- 快捷键提示模态框 -->
+    <KeyboardShortcutsModal :visible="showShortcutsModal" @close="showShortcutsModal = false" />
     <!-- 歌曲信息 -->
     <div class="song-info">
       <div class="info-text">
@@ -11,6 +13,22 @@
     <!-- 主控制区 -->
     <div class="main-controls">
       <div class="buttons">
+        <!-- NEW: 切换播放模式按钮 -->
+        <button class="control-btn secondary" :class="{ active: store.playMode && store.playMode !== 'REPEAT_ALL' }" @click="togglePlayMode" :title="playModeTitle">
+          <!-- 随机播放图标 -->
+          <svg v-if="store.playMode === 'SHUFFLE'" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M10.59 9.17 5.41 4 4 5.41l5.17 5.17 1.42-1.41zM14.5 4l2.04 2.04L4 18.59 5.41 20 17.96 7.46 20 9.5V4h-5.5zm.33 9.41-1.41 1.41 3.13 3.13L14.5 20H20v-5.5l-2.04 2.04-3.13-3.13z"/>
+          </svg>
+          <!-- 单曲循环图标 -->
+          <svg v-else-if="store.playMode === 'REPEAT_ONE'" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M7 7h10v3l4-4-4-4v3H5v6h2V7zm10 10H7v-3l-4 4 4 4v-3h12v-6h-2v4zm-4-2V9h-1l-2 1v1h1.5v2.5H13z"/>
+          </svg>
+          <!-- 列表循环图标 (默认) -->
+          <svg v-else viewBox="0 0 24 24" fill="currentColor">
+            <path d="M7 7h10v3l4-4-4-4v3H5v6h2V7zm10 10H7v-3l-4 4 4 4v-3h12v-6h-2v4z"/>
+          </svg>
+        </button>
+
         <!-- 上一首 -->
         <button class="control-btn secondary" @click="store.prev()">
           <svg viewBox="0 0 24 24" fill="currentColor"><path d="M6 6h2v12H6zm3.5 6l8.5 6V6z"/></svg>
@@ -31,19 +49,19 @@
       <!-- 播放进度条 -->
       <div class="progress-bar">
         <span class="time-text">{{ formatTime(isSeeking ? localProgressValue : store.progressMs) }}</span>
-        
-        <input 
-          type="range" 
-          class="custom-range"
-          min="0" 
-          :max="store.currentSong?.duration_ms || 0"
-          :value="isSeeking ? localProgressValue : store.progressMs" 
-          :style="getSliderStyle(isSeeking ? localProgressValue : store.progressMs, store.currentSong?.duration_ms || 0)"
-          @mousedown="handleSeekStart" 
-          @input="handleSeeking"
-          @change="handleSeekEnd" 
+
+        <input
+            type="range"
+            class="custom-range"
+            min="0"
+            :max="store.currentSong?.duration_ms || 0"
+            :value="isSeeking ? localProgressValue : store.progressMs"
+            :style="getSliderStyle(isSeeking ? localProgressValue : store.progressMs, store.currentSong?.duration_ms || 0)"
+            @mousedown="handleSeekStart"
+            @input="handleSeeking"
+            @change="handleSeekEnd"
         />
-        
+
         <span class="time-text">{{ formatTime(store.currentSong?.duration_ms || 0) }}</span>
       </div>
     </div>
@@ -54,24 +72,71 @@
         <svg v-if="store.localVolume === 0" viewBox="0 0 24 24" fill="currentColor"><path d="M16.5 12c0-1.77-1.02-3.29-2.5-4.03v2.21l2.45 2.45c.03-.2.05-.41.05-.63zm2.5 0c0 .94-.2 1.82-.54 2.64l1.51 1.51C20.63 14.91 21 13.5 21 12c0-4.28-2.99-7.86-7-8.77v2.06c2.89.86 5 3.54 5 6.71zM4.27 3L3 4.27 7.73 9H3v6h4l5 5v-6.73l4.25 4.25c-.67.52-1.42.93-2.25 1.18v2.06c1.38-.31 2.63-.95 3.69-1.81L19.73 21 21 19.73 4.27 3zM12 4L9.91 6.09 12 8.18V4z"/></svg>
         <svg v-else viewBox="0 0 24 24" fill="currentColor"><path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z"/></svg>
       </div>
-      <input 
-        type="range" 
-        class="custom-range volume-range"
-        min="0" 
-        max="1" 
-        step="0.01" 
-        :value="store.localVolume" 
-        :style="getSliderStyle(store.localVolume, 1)"
-        @input="onVolumeChange" 
+      <input
+          type="range"
+          class="custom-range volume-range"
+          min="0"
+          max="1"
+          step="0.01"
+          :value="store.localVolume"
+          :style="getSliderStyle(store.localVolume, 1)"
+          @input="onVolumeChange"
       />
     </div>
   </div>
 </template>
 
 <script setup>
-import { ref } from 'vue';
+// --- MODIFIED: 引入 onMounted, onUnmounted ---
+import { ref, computed, onMounted, onUnmounted } from 'vue';
 import { usePlayerStore } from '@/stores/player.js';
+// --- NEW: 引入快捷键提示组件 ---
+import KeyboardShortcutsModal from './KeyboardShortcutsModal.vue';
 const store = usePlayerStore();
+// --- NEW: 控制快捷键提示模态框的显示状态 ---
+const showShortcutsModal = ref(false);
+// --- NEW: 全局键盘事件处理器 ---
+const handleKeyDown = (event) => {
+  // 如果焦点在输入框内，则不触发快捷键
+  if (['INPUT', 'TEXTAREA'].includes(event.target.tagName)) {
+    return;
+  }
+  // Shift + ? 显示帮助
+  if (event.shiftKey && event.key === '?') {
+    event.preventDefault(); // 防止浏览器默认行为
+    showShortcutsModal.value = !showShortcutsModal.value;
+    return;
+  }
+  // 如果模态框是打开的，则不触发其他快捷键
+  if (showShortcutsModal.value) {
+    return;
+  }
+  // 根据按键触发不同操作
+  switch (event.key.toLowerCase()) {
+    case 'p':
+      togglePlayPause();
+      break;
+    case 'j':
+      store.next();
+      break;
+    case 'k':
+      store.prev();
+      break;
+    case 'm':
+      toggleMute();
+      break;
+    case 'c':
+      togglePlayMode();
+      break;
+  }
+};
+// --- NEW: 在组件挂载时添加监听器，卸载时移除 ---
+onMounted(() => {
+  window.addEventListener('keydown', handleKeyDown);
+});
+onUnmounted(() => {
+  window.removeEventListener('keydown', handleKeyDown);
+});
 
 // --- 样式辅助函数: 动态计算背景渐变 ---
 const getSliderStyle = (current, max) => {
@@ -81,12 +146,31 @@ const getSliderStyle = (current, max) => {
   };
 };
 
+// --- NEW: 播放模式相关 ---
+const togglePlayMode = () => {
+  // 假设 store 中有这个方法，它会调用后端 API
+  store.togglePlayMode();
+};
+
+const playModeTitle = computed(() => {
+  switch (store.playMode) {
+    case 'SHUFFLE':
+      return '随机播放';
+    case 'REPEAT_ONE':
+      return '单曲循环';
+    case 'REPEAT_ALL':
+      return '列表循环';
+    default:
+      return '切换播放模式';
+  }
+});
+
+// --- 现有代码 ---
 const onVolumeChange = (event) => {
   const newVolume = parseFloat(event.target.value);
   store.setLocalVolume(newVolume);
 };
 
-// 切换静音方法
 const toggleMute = () => {
   store.toggleMute();
 };
@@ -99,7 +183,6 @@ const togglePlayPause = () => {
   }
 };
 
-// --- 用于拖动逻辑的本地状态 ---
 const isSeeking = ref(false);
 const localProgressValue = ref(0);
 const handleSeekStart = () => {
@@ -129,7 +212,7 @@ const formatTime = (ms) => {
   justify-content: space-between;
   align-items: center;
   padding: 1rem 1.5rem;
-  background-color: #181818; /* 底栏背景 */
+  background-color: #181818;
   border-top: 1px solid #282828;
   color: #fff;
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu, Cantarell, "Open Sans", "Helvetica Neue", sans-serif;
@@ -137,7 +220,6 @@ const formatTime = (ms) => {
   box-sizing: border-box;
 }
 
-/* --- 歌曲信息 --- */
 .song-info {
   flex: 1;
   min-width: 180px;
@@ -173,10 +255,9 @@ const formatTime = (ms) => {
   cursor: pointer;
 }
 
-/* --- 主控制区 --- */
 .main-controls {
   flex: 2;
-  max-width: 722px; /* 限制最大宽度以免拉得太长 */
+  max-width: 722px;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -187,7 +268,7 @@ const formatTime = (ms) => {
 .buttons {
   display: flex;
   align-items: center;
-  gap: 1.5rem;
+  gap: 1rem; /* 减小按钮间距以容纳新按钮 */
   margin-bottom: 4px;
 }
 
@@ -204,7 +285,7 @@ const formatTime = (ms) => {
 }
 
 .control-btn svg {
-  width: 24px; /* 默认图标大小 */
+  width: 24px;
   height: 24px;
 }
 
@@ -216,7 +297,14 @@ const formatTime = (ms) => {
   transform: scale(0.95);
 }
 
-/* 播放暂停主按钮样式 */
+/* NEW: 激活状态的按钮样式 */
+.control-btn.active {
+  color: #1DB954;
+}
+.control-btn.active:hover {
+  color: #1ED760;
+}
+
 .control-btn.primary {
   color: #000;
   background-color: #fff;
@@ -231,17 +319,15 @@ const formatTime = (ms) => {
   color: #000;
 }
 .control-btn.primary svg {
-  width: 16px; /* 内部图标稍小一点 */
+  width: 16px;
   height: 16px;
 }
 
 .control-btn.secondary svg {
-  width: 18px; /* 前后切歌按钮大小 */
+  width: 18px;
   height: 18px;
 }
 
-
-/* --- 进度条区域 --- */
 .progress-bar {
   display: flex;
   align-items: center;
@@ -257,19 +343,17 @@ const formatTime = (ms) => {
   text-align: center;
 }
 
-/* --- 自定义 Input Range 样式 (核心) --- */
 .custom-range {
-  appearance: none; /* 清除默认样式 */
+  appearance: none;
   width: 100%;
   height: 4px;
   border-radius: 2px;
-  background: #535353; /* 默认未填充背景，但在 JS 中会被覆盖 */
+  background: #535353;
   outline: none;
   cursor: pointer;
   flex-grow: 1;
 }
 
-/* 滑块头 (Thumb) - Chrome/Safari/Edge */
 .custom-range::-webkit-slider-thumb {
   -webkit-appearance: none;
   appearance: none;
@@ -279,18 +363,16 @@ const formatTime = (ms) => {
   background: #fff;
   box-shadow: 0 2px 4px rgba(0,0,0,0.2);
   cursor: pointer;
-  opacity: 0; /* 默认隐藏滑块，像 Spotify 一样 */
+  opacity: 0;
   transition: opacity 0.2s;
 }
 
-/* 鼠标悬停进度条时显示滑块头 */
 .custom-range:hover::-webkit-slider-thumb {
   opacity: 1;
 }
 
-/* 轨道进度颜色 - Firefox (Firefox需要单独设置) */
 .custom-range::-moz-range-progress {
-  background-color: #1DB954; 
+  background-color: #1DB954;
   height: 4px;
   border-radius: 2px;
 }
@@ -312,7 +394,6 @@ const formatTime = (ms) => {
   opacity: 1;
 }
 
-/* --- 音量控制 --- */
 .volume-control {
   flex: 1;
   min-width: 180px;
@@ -326,7 +407,6 @@ const formatTime = (ms) => {
   color: #b3b3b3;
   width: 18px;
   height: 18px;
-  /* 鼠标手势与悬停效果 */
   cursor: pointer;
   transition: color 0.2s;
 }
@@ -341,13 +421,12 @@ const formatTime = (ms) => {
 }
 
 .volume-range {
-  max-width: 100px; /* 音量条不需要太长 */
+  max-width: 100px;
 }
 
-/* 响应式适配 */
 @media (max-width: 768px) {
   .song-info, .volume-control {
-    display: none; /* 移动端可以隐藏左右两侧，只留中间 */
+    display: none;
   }
 }
 </style>

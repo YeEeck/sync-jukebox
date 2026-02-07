@@ -60,6 +60,9 @@ export default {
     shufflePlaylist() {
         return apiClient.post('/playlist/shuffle');
     },
+    togglePlayMode() {
+        return apiClient.post('/player/toggle-mode');
+    },
     // 播放器控制
     play() {
         return apiClient.post('/player/play');

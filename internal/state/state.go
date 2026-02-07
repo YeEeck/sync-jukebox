@@ -56,6 +56,9 @@ func NewManager(db *db.DB, hub *websocket.Hub) (*Manager, error) {
 	if err := m.loadFromDB(); err != nil {
 		return nil, err
 	}
+	// 初始化随机数种子
+	rand.New(rand.NewSource(time.Now().UnixNano()))
+
 	log.Println("State manager initialized and loaded from DB.")
 	return m, nil
 }
@@ -76,6 +79,14 @@ func (m *Manager) loadFromDB() error {
 	progressStr, _ := m.db.GetSystemState("progress_ms")
 	progress, _ := strconv.ParseInt(progressStr, 10, 64)
 	m.State.ProgressMs = progress
+
+	// NEW: 加载播放模式
+	playModeStr, _ := m.db.GetSystemState("play_mode")
+	if playModeStr == string(Shuffle) || playModeStr == string(RepeatOne) {
+		m.State.PlayMode = PlayMode(playModeStr)
+	} else {
+		m.State.PlayMode = RepeatAll // 默认或无效值处理
+	}
 
 	lastUpdateStr, _ := m.db.GetSystemState("last_update_unix")
 	lastUpdateUnix, _ := strconv.ParseInt(lastUpdateStr, 10, 64)
@@ -110,8 +121,43 @@ func (m *Manager) GetFullState() interface{} {
 }
 
 // --- 核心操作方法 ---
-// 遵循 "更新内存 -> 更新DB -> 触发广播" 的原子流程
+// SetPlayMode 设置新的播放模式
+func (m *Manager) SetPlayMode(mode PlayMode) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	// 验证模式有效性
+	switch mode {
+	case RepeatAll, RepeatOne, Shuffle:
+		m.State.PlayMode = mode
+		m.db.SetSystemState("play_mode", string(mode))
+		m.hub.Broadcast(m.State)
+		log.Printf("Action: Set Play Mode to %s", mode)
+	default:
+		log.Printf("Warning: Invalid play mode requested: %s", mode)
+	}
+}
 
+// TogglePlayMode 循环切换可用的播放模式
+func (m *Manager) TogglePlayMode() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	switch m.State.PlayMode {
+	case RepeatAll:
+		m.State.PlayMode = RepeatOne
+	case RepeatOne:
+		m.State.PlayMode = Shuffle
+	case Shuffle:
+		m.State.PlayMode = RepeatAll
+	default:
+		m.State.PlayMode = RepeatAll // 作为后备
+	}
+	// 持久化并广播变更
+	m.db.SetSystemState("play_mode", string(m.State.PlayMode))
+	m.hub.Broadcast(m.State)
+	log.Printf("Action: Toggled Play Mode to %s", m.State.PlayMode)
+}
+
+// 遵循 "更新内存 -> 更新DB -> 触发广播" 的原子流程
 func (m *Manager) Play() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -163,33 +209,43 @@ func (m *Manager) Pause() {
 	log.Println("Action: Pause")
 }
 
+// MODIFIED: NextSong 根据播放模式决定下一首
 func (m *Manager) NextSong() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-
 	if len(m.State.Playlist) == 0 {
 		m.stopPlayback()
 		return
 	}
-
-	// TODO: 实现不同播放模式的逻辑
-	nextIdx := (m.State.CurrentPlaylistIdx + 1) % len(m.State.Playlist)
-
+	var nextIdx int
+	// 手动点击“下一首”时，即使是单曲循环模式，也应该切换到下一首歌
+	// 但随机模式应该被遵守
+	if m.State.PlayMode == Shuffle {
+		if len(m.State.Playlist) <= 1 {
+			nextIdx = 0
+		} else {
+			// 随机选择一个与当前不同的索引
+			nextIdx = rand.Intn(len(m.State.Playlist))
+			for nextIdx == m.State.CurrentPlaylistIdx {
+				nextIdx = rand.Intn(len(m.State.Playlist))
+			}
+		}
+	} else { // RepeatAll 和 RepeatOne 模式下，手动点击下一首行为一致
+		nextIdx = (m.State.CurrentPlaylistIdx + 1) % len(m.State.Playlist)
+	}
 	m.changeSong(nextIdx)
-	log.Println("Action: Next Song")
+	log.Println("Action: Next Song (manual)")
 }
 
 func (m *Manager) PrevSong() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-
 	if len(m.State.Playlist) == 0 {
 		m.stopPlayback()
 		return
 	}
-
+	// "上一首"通常不遵循随机模式，而是返回列表中的上一首，这更符合用户直觉
 	nextIdx := (m.State.CurrentPlaylistIdx - 1 + len(m.State.Playlist)) % len(m.State.Playlist)
-
 	m.changeSong(nextIdx)
 	log.Println("Action: Previous Song")
 }
@@ -545,6 +601,7 @@ func (m *Manager) stopPlayback() {
 	m.hub.Broadcast(m.State)
 }
 
+// MODIFIED: startProgressTicker 现在根据播放模式处理歌曲结束事件
 func (m *Manager) startProgressTicker() {
 	if m.ticker != nil {
 		return
@@ -558,24 +615,44 @@ func (m *Manager) startProgressTicker() {
 				return
 			}
 			m.State.ProgressMs += 1000
-
-			// 如果歌曲结束，自动下一首
+			// 如果歌曲结束，根据播放模式自动下一首
 			if m.State.CurrentSong != nil && m.State.ProgressMs >= int64(m.State.CurrentSong.DurationMs) {
-				// 调用内部的next方法，避免死锁
-				if len(m.State.Playlist) > 0 {
-					nextIdx := (m.State.CurrentPlaylistIdx + 1) % len(m.State.Playlist)
-					m.changeSong(nextIdx)
-				} else {
-					m.stopPlayback()
-				}
+				m.playNextSongAfterEnd() // 使用新的辅助函数处理
 			}
 			m.mu.Unlock()
-
-			// 定期广播，减少频率以降低网络负载
-			// 这里我们每秒都广播，以便进度条平滑
 			m.hub.Broadcast(m.State)
 		}
 	}()
+}
+
+// NEW: playNextSongAfterEnd 处理歌曲自然播放结束后的逻辑
+func (m *Manager) playNextSongAfterEnd() {
+	// 这个方法假设锁已经被持有
+	if len(m.State.Playlist) == 0 {
+		m.stopPlayback()
+		return
+	}
+	var nextIdx int
+	switch m.State.PlayMode {
+	case RepeatOne:
+		nextIdx = m.State.CurrentPlaylistIdx // 保持当前索引，即重播
+	case Shuffle:
+		if len(m.State.Playlist) <= 1 {
+			nextIdx = 0
+		} else {
+			nextIdx = rand.Intn(len(m.State.Playlist))
+			// 为避免连续播放同一首，可以加上这个判断（可选）
+			for len(m.State.Playlist) > 1 && nextIdx == m.State.CurrentPlaylistIdx {
+				nextIdx = rand.Intn(len(m.State.Playlist))
+			}
+		}
+	case RepeatAll:
+		fallthrough
+	default: // 默认列表循环
+		nextIdx = (m.State.CurrentPlaylistIdx + 1) % len(m.State.Playlist)
+	}
+	m.changeSong(nextIdx)
+	log.Println("Action: Auto-advancing to next song based on play mode")
 }
 
 func (m *Manager) stopProgressTicker() {

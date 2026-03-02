@@ -1,12 +1,16 @@
 <template>
   <div class="media-library-container">
     <h2>Media Library</h2>
+
     <!-- 文件上传 -->
     <MediaUpload />
 
+    <!-- SearchBar 组件 -->
+    <SearchBar v-model="searchQuery" />
+
     <!-- 歌曲列表 -->
     <ul class="song-list">
-      <li v-for="song in store.mediaLibrary" :key="song.id" class="song-item">
+      <li v-for="song in filteredLibrary" :key="song.id" class="song-item">
         <div class="song-details">
           <span class="song-title">{{ song.title }}</span>
           <span class="song-artist">{{ song.artist || 'Unknown Artist' }}</span>
@@ -41,13 +45,32 @@
 import { ref, onMounted, onUnmounted, computed } from 'vue';
 import { usePlayerStore } from '@/stores/player';
 import MediaUpload from '@/components/MediaUpload.vue';
+import SearchBar from '@/components/SearchBar.vue';
+
 const store = usePlayerStore();
 const pollingInterval = ref(null);
 const isLoading = ref(false);
 
+const searchQuery = ref(''); // 搜索状态保留在父组件中
+
 const playlistSongIds = computed(() => {
   return new Set(store.playlist.map(item => item.song_id));
 });
+
+// 过滤逻辑保持不变，它依赖于本组件的 searchQuery
+const filteredLibrary = computed(() => {
+  const searchTerm = searchQuery.value.trim().toLowerCase();
+  if (!searchTerm) {
+    return store.mediaLibrary;
+  }
+
+  return store.mediaLibrary.filter(song => {
+    const titleMatch = song.title.toLowerCase().includes(searchTerm);
+    const artistMatch = song.artist && song.artist.toLowerCase().includes(searchTerm);
+    return titleMatch || artistMatch;
+  });
+});
+
 
 const refreshLibrary = async () => {
   if (isLoading.value) return;

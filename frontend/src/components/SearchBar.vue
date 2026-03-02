@@ -14,9 +14,7 @@ const model = defineModel();
 
 <style scoped>
 .search-bar {
-  /* --- MODIFIED: 减小了下边距 --- */
-  /* 修改前: margin: 1rem 0 0.5rem; */
-  margin: 0.5rem 0 0.5rem; /* 将下边距从 0.5rem 减小到 0.25rem */
+  margin: 0.5rem 0;
   padding: 0 0.25rem;
 }
 

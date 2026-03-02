@@ -8,7 +8,7 @@
     <!-- SearchBar 组件 -->
     <SearchBar v-model="searchQuery" />
 
-    <!-- 歌曲列表 (现在使用 filteredLibrary) -->
+    <!-- 歌曲列表 -->
     <ul class="song-list">
       <li v-for="song in filteredLibrary" :key="song.id" class="song-item">
         <div class="song-details">
@@ -45,7 +45,7 @@
 import { ref, onMounted, onUnmounted, computed } from 'vue';
 import { usePlayerStore } from '@/stores/player';
 import MediaUpload from '@/components/MediaUpload.vue';
-import SearchBar from '@/components/SearchBar.vue'; // --- 新增: 导入 SearchBar 组件 ---
+import SearchBar from '@/components/SearchBar.vue';
 
 const store = usePlayerStore();
 const pollingInterval = ref(null);

@@ -1,12 +1,17 @@
 <template>
   <div class="media-library-container">
     <h2>Media Library</h2>
+
     <!-- 文件上传 -->
     <MediaUpload />
 
-    <!-- 歌曲列表 -->
+    <!-- SearchBar 组件 -->
+    <!-- 可以在此处通过 props 传递 placeholder 提示用户支持高级搜索，如果 SearchBar 支持的话 -->
+    <SearchBar v-model="searchQuery" />
+
+    <!-- 歌曲列表 (现在使用 filteredLibrary) -->
     <ul class="song-list">
-      <li v-for="song in store.mediaLibrary" :key="song.id" class="song-item">
+      <li v-for="song in filteredLibrary" :key="song.id" class="song-item">
         <div class="song-details">
           <span class="song-title">{{ song.title }}</span>
           <span class="song-artist">{{ song.artist || 'Unknown Artist' }}</span>
@@ -41,13 +46,48 @@
 import { ref, onMounted, onUnmounted, computed } from 'vue';
 import { usePlayerStore } from '@/stores/player';
 import MediaUpload from '@/components/MediaUpload.vue';
+import SearchBar from '@/components/SearchBar.vue'; // --- 新增: 导入 SearchBar 组件 ---
+
 const store = usePlayerStore();
 const pollingInterval = ref(null);
 const isLoading = ref(false);
 
+const searchQuery = ref(''); // 搜索状态保留在父组件中
+
 const playlistSongIds = computed(() => {
   return new Set(store.playlist.map(item => item.song_id));
 });
+
+// 修改后的过滤逻辑：默认搜歌名，支持 tag 搜歌手
+const filteredLibrary = computed(() => {
+  const rawInput = searchQuery.value.trim().toLowerCase();
+
+  // 如果没有输入，显示全部
+  if (!rawInput) {
+    return store.mediaLibrary;
+  }
+
+  // 定义歌手搜索的前缀 (支持 "artist:" 或 "@")
+  const artistPrefixes = ['a:', '@'];
+  const matchedPrefix = artistPrefixes.find(prefix => rawInput.startsWith(prefix));
+
+  // 如果检测到歌手 tag
+  if (matchedPrefix) {
+    const term = rawInput.slice(matchedPrefix.length).trim();
+    // 如果只有前缀没有内容，依然返回全部，或者可以返回空，这里选择返回全部体验较好
+    if (!term) return store.mediaLibrary;
+
+    return store.mediaLibrary.filter(song =>
+        song.artist && song.artist.toLowerCase().includes(term)
+    );
+  }
+
+  // 默认逻辑：仅搜索歌名 (Title)
+  return store.mediaLibrary.filter(song => {
+    return song.title.toLowerCase().includes(rawInput);
+  });
+});
+
 
 const refreshLibrary = async () => {
   if (isLoading.value) return;

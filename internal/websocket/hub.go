@@ -5,6 +5,7 @@ import (
 	"fmt" // --- NEW ---
 	"log"
 	"net/http"
+	"strings"
 	"sync"
 
 	"github.com/gorilla/websocket"
@@ -115,10 +116,15 @@ func (h *Hub) GetOnlineUsers() []UserInfo {
 
 	for client := range h.clients {
 		if client.User != nil {
+			username := client.User.Username
+			// 检查用户名是否包含"@"，如果包含，则只取"@"之前的部分
+			if strings.Contains(username, "@") {
+				username = strings.Split(username, "@")[0]
+			}
 			// 用 User.ID 作为 key 来去重
 			uniqueUsers[client.User.ID] = UserInfo{
 				ID:       fmt.Sprintf("%d", client.User.ID),
-				Username: client.User.Username,
+				Username: username, // 使用处理后的用户名
 			}
 		}
 	}
